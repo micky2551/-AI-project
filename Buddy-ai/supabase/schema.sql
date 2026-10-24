@@ -339,3 +339,38 @@ grant select on public.audit_logs to authenticated;
 -- 2. Run the following in SQL Editor after replacing the email:
 -- update public.profiles set role = 'admin' where email = 'YOUR_VERIFIED_ADMIN_EMAIL';
 -- 3. Never put the Admin password or service-role key into source code.
+
+-- Private persistent study-file library. Existing learning data is preserved.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('study-files', 'study-files', false, 50000000,
+  array['application/pdf','image/png','image/jpeg','image/webp','text/plain','text/markdown','text/csv','application/octet-stream'])
+on conflict (id) do update set public = false, file_size_limit = 50000000, allowed_mime_types = excluded.allowed_mime_types;
+create table if not exists public.study_files (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  course_id uuid references public.courses(id) on delete set null,
+  file_name text not null, mime_type text not null,
+  size_bytes bigint not null check (size_bytes > 0 and size_bytes <= 50000000),
+  storage_path text not null unique, created_at timestamptz not null default now()
+);
+alter table public.study_files enable row level security;
+drop policy if exists study_files_owner_only on public.study_files;
+create policy study_files_owner_only on public.study_files for all to authenticated
+using (user_id = (select auth.uid()) and public.is_active_user())
+with check (user_id = (select auth.uid()) and public.is_active_user());
+grant select, insert, update, delete on public.study_files to authenticated;
+alter table public.learning_materials add column if not exists study_file_id uuid references public.study_files(id) on delete set null;
+create index if not exists study_files_user_created_idx on public.study_files(user_id, created_at desc);
+drop policy if exists study_files_storage_select_own on storage.objects;
+create policy study_files_storage_select_own on storage.objects for select to authenticated
+using (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user());
+drop policy if exists study_files_storage_insert_own on storage.objects;
+create policy study_files_storage_insert_own on storage.objects for insert to authenticated
+with check (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user());
+drop policy if exists study_files_storage_update_own on storage.objects;
+create policy study_files_storage_update_own on storage.objects for update to authenticated
+using (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user())
+with check (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user());
+drop policy if exists study_files_storage_delete_own on storage.objects;
+create policy study_files_storage_delete_own on storage.objects for delete to authenticated
+using (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user());

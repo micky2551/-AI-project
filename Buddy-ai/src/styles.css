@@ -958,3 +958,8 @@ code { padding: 2px 5px; border-radius: 5px; background: #f3f4f9; color: #6857bc
     width: 100%;
   }
 }
+
+.study-file-library { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border, #dce2ed); border-radius: 12px; background: var(--surface, #fff); }
+.study-file-library .field { margin: 0; }
+.study-file-library select { width: 100%; }
+.study-file-library-note { color: var(--muted, #8790a3); font-size: 12px; line-height: 1.6; }

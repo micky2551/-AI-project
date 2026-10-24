@@ -51,6 +51,8 @@ async function requireUser(req, res, next) {
     const { data: profile, error: profileError } = await client.from('profiles').select('is_active').eq('id', data.user.id).maybeSingle();
     if (profileError || !profile || !profile.is_active) return res.status(403).json({ error: 'This account cannot use AI features.' });
     req.user = data.user;
+    req.supabase = client;
+    req.accessToken = token;
     next();
   } catch {
     return res.status(401).json({ error: 'Could not validate the session.' });
@@ -171,11 +173,29 @@ function validateAttachment(value) {
   return { attachment: { mimeType: value.mimeType, base64, name: typeof value.name === 'string' ? value.name.slice(0, 180) : 'attachment' }, error: null };
 }
 
+async function loadStoredAttachment(req, studyFileId) {
+  if (!studyFileId) return { attachment: null, error: null };
+  if (typeof studyFileId !== 'string' || studyFileId.length > 80) return { attachment: null, error: 'รหัสไฟล์ไม่ถูกต้อง' };
+  const { data: file, error: fileError } = await req.supabase.from('study_files')
+    .select('id,user_id,file_name,mime_type,size_bytes,storage_path')
+    .eq('id', studyFileId).eq('user_id', req.user.id).maybeSingle();
+  if (fileError || !file) return { attachment: null, error: 'ไม่พบไฟล์ในคลังส่วนตัวหรือคุณไม่มีสิทธิ์เข้าถึง' };
+  if (!ALLOWED_ATTACHMENT_TYPES.has(file.mime_type)) return { attachment: null, error: 'AI รองรับเฉพาะไฟล์ PDF, PNG, JPG และ WEBP จากคลัง' };
+  if (file.size_bytes > MAX_ATTACHMENT_BYTES) return { attachment: null, error: 'ไฟล์นี้เก็บไว้ได้ แต่ AI รองรับไฟล์สูงสุด 20 MB ต่อครั้ง' };
+  const { data: blob, error: downloadError } = await req.supabase.storage.from('study-files').download(file.storage_path);
+  if (downloadError || !blob) return { attachment: null, error: 'ดาวน์โหลดไฟล์จากคลังส่วนตัวไม่สำเร็จ' };
+  if (blob.size > MAX_ATTACHMENT_BYTES) return { attachment: null, error: 'ไฟล์นี้เก็บไว้ได้ แต่ AI รองรับไฟล์สูงสุด 20 MB ต่อครั้ง' };
+  return validateAttachment({ mimeType: file.mime_type, name: file.file_name, base64: Buffer.from(await blob.arrayBuffer()).toString('base64') });
+}
+
 app.post('/api/ai/summary', requireUser, async (req, res) => {
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   const title = typeof req.body?.title === 'string' ? req.body.title.slice(0, 160) : 'บทเรียน';
-  const { attachment, error: attachmentError } = validateAttachment(req.body?.attachment);
-  if (attachmentError) return res.status(400).json({ error: attachmentError });
+  const { attachment: uploadedAttachment, error: uploadedAttachmentError } = validateAttachment(req.body?.attachment);
+  if (uploadedAttachmentError) return res.status(400).json({ error: uploadedAttachmentError });
+  const { attachment: storedAttachment, error: storedAttachmentError } = await loadStoredAttachment(req, req.body?.studyFileId);
+  if (storedAttachmentError) return res.status(400).json({ error: storedAttachmentError });
+  const attachment = storedAttachment || uploadedAttachment;
   if ((!attachment && content.length < 50) || content.length > 50_000) return res.status(400).json({ error: 'กรุณาใส่ข้อความอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์ และข้อความต้องไม่เกิน 50,000 ตัวอักษร' });
   try {
     const result = await askAI(
@@ -194,8 +214,11 @@ app.post('/api/ai/quiz', requireUser, async (req, res) => {
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   const topic = typeof req.body?.topic === 'string' ? req.body.topic.slice(0, 160) : 'บทเรียนทั่วไป';
   const count = Math.min(20, Math.max(5, Number.parseInt(req.body?.count, 10) || 5));
-  const { attachment, error: attachmentError } = validateAttachment(req.body?.attachment);
-  if (attachmentError) return res.status(400).json({ error: attachmentError });
+  const { attachment: uploadedAttachment, error: uploadedAttachmentError } = validateAttachment(req.body?.attachment);
+  if (uploadedAttachmentError) return res.status(400).json({ error: uploadedAttachmentError });
+  const { attachment: storedAttachment, error: storedAttachmentError } = await loadStoredAttachment(req, req.body?.studyFileId);
+  if (storedAttachmentError) return res.status(400).json({ error: storedAttachmentError });
+  const attachment = storedAttachment || uploadedAttachment;
   if ((!attachment && content.length < 50) || content.length > 50_000) return res.status(400).json({ error: 'กรุณาใส่ข้อความอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์ และข้อความต้องไม่เกิน 50,000 ตัวอักษร' });
   try {
     const result = await askAI(

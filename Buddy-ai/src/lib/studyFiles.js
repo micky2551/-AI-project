@@ -285,3 +285,38 @@ function awaitCanvasBlob(canvas) {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('สร้างไฟล์ PNG ไม่สำเร็จ กรุณาลองอีกครั้ง')), 'image/png');
   });
 }
+
+const STORAGE_BUCKET = 'study-files';
+function safeStorageFileName(name) {
+  return String(name || 'study-file').normalize('NFKC').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(-120) || 'study-file';
+}
+export async function uploadStoredStudyFile(client, file, userId, courseId = null) {
+  if (!file || !userId) throw new Error('กรุณาเข้าสู่ระบบและเลือกไฟล์');
+  if (file.size <= 0 || file.size > MAX_FILE_BYTES) throw new Error('ไฟล์ว่างหรือใหญ่เกิน 20 MB');
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  const mimeMap = { txt: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', csv: 'text/csv', log: 'text/plain', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+  const mimeType = mimeMap[ext] || file.type || 'application/octet-stream';
+  const storagePath = userId + '/' + crypto.randomUUID() + '-' + safeStorageFileName(file.name);
+  const { error: uploadError } = await client.storage.from(STORAGE_BUCKET).upload(storagePath, file, { contentType: mimeType, upsert: false });
+  if (uploadError) throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + uploadError.message);
+  const { data, error: rowError } = await client.from('study_files').insert({
+    user_id: userId, course_id: courseId || null, file_name: file.name.slice(0, 255),
+    mime_type: mimeType, size_bytes: file.size, storage_path: storagePath,
+  }).select('id,user_id,course_id,file_name,mime_type,size_bytes,storage_path,created_at').single();
+  if (rowError || !data) {
+    await client.storage.from(STORAGE_BUCKET).remove([storagePath]);
+    throw new Error('บันทึกข้อมูลไฟล์ไม่สำเร็จ กรุณาลองใหม่');
+  }
+  return data;
+}
+export async function downloadStoredStudyFile(client, item) {
+  const { data, error } = await client.storage.from(STORAGE_BUCKET).download(item.storage_path);
+  if (error || !data) throw new Error('ดาวน์โหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่');
+  return data;
+}
+export async function deleteStoredStudyFile(client, item) {
+  const { error: storageError } = await client.storage.from(STORAGE_BUCKET).remove([item.storage_path]);
+  if (storageError) throw new Error('ลบไฟล์ออกจากพื้นที่จัดเก็บไม่สำเร็จ');
+  const { error: rowError } = await client.from('study_files').delete().eq('id', item.id);
+  if (rowError) throw new Error('ลบข้อมูลไฟล์ไม่สำเร็จ');
+}
