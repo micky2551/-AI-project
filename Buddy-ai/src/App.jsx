@@ -115,6 +115,7 @@ function AuthLayout({ title, subtitle, children, footnote }) {
 function LoginPage() {
   const { profileError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -130,7 +131,9 @@ function LoginPage() {
     const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setBusy(false);
     if (loginError) { setError('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูลหรือยืนยันอีเมลก่อน'); return; }
-    navigate('/');
+    const returnTo = location.state?.from;
+    const destination = typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/';
+    navigate(destination);
   }
   return <AuthLayout title="ยินดีต้อนรับกลับ" subtitle="เข้าสู่ระบบเพื่อไปต่อกับแผนการเรียนของคุณ">
     {error && <Notice kind="error">{error}</Notice>}{notice && <Notice kind="success">{notice}</Notice>}
