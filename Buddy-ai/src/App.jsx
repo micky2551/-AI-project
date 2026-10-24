@@ -171,7 +171,7 @@ function RegisterPage() {
       });
       if (signupError) {
         // Keep provider diagnostics in the browser console only during local development.
-        if (import.meta.env.DEV) console.error('[StudyPilot] Signup failed:', { message: signupError.message, code: signupError.code, status: signupError.status });
+        if (import.meta.env.DEV) console.error('[Buddy AI] Signup failed:', { message: signupError.message, code: signupError.code, status: signupError.status });
         const detail = `${signupError.code || ''} ${signupError.message || ''}`.toLowerCase();
         if (/already registered|already been registered|user_already_exists|user_already_registered/.test(detail)) {
           setError('อีเมลนี้อาจมีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบหรือใช้เมนู “ลืมรหัสผ่าน?”');
@@ -195,7 +195,7 @@ function RegisterPage() {
       if (data.session) navigate('/');
       else setSuccess('สร้างบัญชีแล้ว กรุณาเปิดอีเมลเพื่อยืนยันบัญชีก่อนเข้าสู่ระบบ');
     } catch (err) {
-      if (import.meta.env.DEV) console.error('[StudyPilot] Unexpected signup error:', err);
+      if (import.meta.env.DEV) console.error('[Buddy AI] Unexpected signup error:', err);
       setError(import.meta.env.DEV
         ? `เชื่อมต่อระบบสมัครสมาชิกไม่สำเร็จ: ${err instanceof Error ? err.message : 'ตรวจสอบการเชื่อมต่อเครือข่ายและ Supabase'}`
         : 'เชื่อมต่อระบบสมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
@@ -497,16 +497,24 @@ function SummaryPage() {
   async function saveSummary() {
     if (!summary.trim()) return;
     setSaving(true); setError(''); setSavedNotice('');
-    const titleValue = title.trim() || 'สรุปบทเรียน';
-    const sourceText = content.trim() || (attachment ? '[ไฟล์แนบ: ' + (fileName || attachment.name) + ']' : '');
-    const row = { title: titleValue, course_id: courseId || null, source_text: sourceText, summary: summary.trim() };
-    const result = selectedMaterialId
-      ? await supabase.from('learning_materials').update(row).eq('id', selectedMaterialId).select('id').maybeSingle()
-      : await supabase.from('learning_materials').insert({ ...row, user_id: user.id }).select('id').single();
-    setSaving(false);
-    if (result.error || !result.data?.id) { setError('บันทึกสรุปไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ฐานข้อมูล'); return; }
-    setSelectedMaterialId(result.data.id); setSavedNotice('บันทึกสรุปในบัญชีของคุณแล้ว'); setEditingSummary(false);
-    await load();
+    try {
+      const titleValue = title.trim() || 'สรุปบทเรียน';
+      const sourceText = content.trim() || (attachment ? '[ไฟล์แนบ: ' + (fileName || attachment.name) + ']' : '');
+      const row = { title: titleValue, course_id: courseId || null, source_text: sourceText, summary: summary.trim() };
+      const result = selectedMaterialId
+        ? await supabase.from('learning_materials').update(row).eq('id', selectedMaterialId).select('id').maybeSingle()
+        : await supabase.from('learning_materials').insert({ ...row, user_id: user.id }).select('id').single();
+      if (result.error || !result.data?.id) {
+        setError('บันทึกสรุปไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ฐานข้อมูล');
+        return;
+      }
+      setSelectedMaterialId(result.data.id); setSavedNotice('บันทึกสรุปในบัญชีของคุณแล้ว'); setEditingSummary(false);
+      await load();
+    } catch {
+      setError('บันทึกสรุปไม่สำเร็จ อาจเกิดจากเครือข่ายขัดข้อง กรุณาลองใหม่');
+    } finally {
+      setSaving(false);
+    }
   }
   function viewMaterial(material) {
     const storedAttachment = typeof material.source_text === 'string' && material.source_text.startsWith('[ไฟล์แนบ:');
