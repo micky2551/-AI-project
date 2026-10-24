@@ -543,7 +543,7 @@ function SummaryPage() {
           <form onSubmit={generate} className="summary-form">
             <Field label="ชื่อบทเรียน" placeholder="เช่น C++ — เงื่อนไขและการวนซ้ำ" value={title} onChange={e => setTitle(e.target.value)} />
             <Field label="รายวิชา"><select value={courseId} onChange={e => setCourseId(e.target.value)}><option value="">เลือกภายหลัง / ไม่ระบุ</option>{courses.map(course => <option key={course.id} value={course.id}>{course.name}</option>)}</select></Field>
-            <Field label="แนบไฟล์จากเครื่อง" hint="รองรับ TXT, MD, CSV, PDF, PNG, JPG และ WEBP · สูงสุด 8 MB">
+            <Field label="แนบไฟล์จากเครื่อง" hint="รองรับ TXT, MD, CSV, PDF, PNG, JPG และ WEBP · PDF/รูปภาพสูงสุด 20 MB; ไฟล์ข้อความสูงสุด 50,000 ตัวอักษร">
               <input type="file" accept=".txt,.md,.markdown,.csv,.log,.pdf,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/csv,application/pdf,image/png,image/jpeg,image/webp" onChange={async e => { const file = e.target.files && e.target.files[0]; if (file) await applyStudyFile(file, setContent, setAttachment, setFileName, setError); e.target.value = ''; }} />
             </Field>
             {fileName && <div className="file-selection"><FileCheck2 size={16} /><span>{fileName}</span><button type="button" className="text-link plain" onClick={() => { setAttachment(null); setFileName(''); }}>เอาไฟล์ออก</button></div>}
