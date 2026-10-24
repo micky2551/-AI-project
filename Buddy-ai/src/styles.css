@@ -963,3 +963,63 @@ code { padding: 2px 5px; border-radius: 5px; background: #f3f4f9; color: #6857bc
 .study-file-library .field { margin: 0; }
 .study-file-library select { width: 100%; }
 .study-file-library-note { color: var(--muted, #8790a3); font-size: 12px; line-height: 1.6; }
+
+
+/* UI resilience and accessibility polish */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid rgba(119, 101, 232, .72);
+  outline-offset: 3px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.file-selection > span,
+.recent-material b,
+.recent-material small,
+.summary-output-meta strong,
+.summary-markdown p,
+.summary-markdown h2,
+.summary-markdown h3,
+.summary-markdown h4,
+.planner-item-title strong,
+.planner-item-main > p,
+.admin-content-card h3,
+.admin-content-card p,
+.system-detail-row b,
+.details-code,
+.data-table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 580px) {
+  .app-footer {
+    flex-wrap: wrap;
+  }
+
+  .page-header-action {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .summary-export-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

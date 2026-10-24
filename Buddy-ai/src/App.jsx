@@ -128,12 +128,17 @@ function LoginPage() {
     event.preventDefault(); setError(''); setNotice('');
     if (!email.trim() || !password) { setError('กรุณากรอกอีเมลและรหัสผ่าน'); return; }
     setBusy(true);
-    const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setBusy(false);
-    if (loginError) { setError('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูลหรือยืนยันอีเมลก่อน'); return; }
-    const returnTo = location.state?.from;
-    const destination = typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/';
-    navigate(destination);
+    try {
+      const { error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (loginError) { setError('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูลหรือยืนยันอีเมลก่อน'); return; }
+      const returnTo = location.state?.from;
+      const destination = typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/';
+      navigate(destination);
+    } catch {
+      setError('เชื่อมต่อระบบเข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง');
+    } finally {
+      setBusy(false);
+    }
   }
   return <AuthLayout title="ยินดีต้อนรับกลับ" subtitle="เข้าสู่ระบบเพื่อไปต่อกับแผนการเรียนของคุณ">
     {error && <Notice kind="error">{error}</Notice>}{notice && <Notice kind="success">{notice}</Notice>}
@@ -213,7 +218,7 @@ function RegisterPage() {
       <Field label="อีเมล" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
       <Field label="รหัสผ่าน" className="password-field" hint="อย่างน้อย 8 ตัวอักษร">
         <input type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="สร้างรหัสผ่าน" value={password} onChange={e => setPassword(e.target.value)} minLength={8} required />
-        <button className="password-toggle" type="button" onClick={() => setShow(v => !v)} aria-label="แสดง/ซ่อนรหัสผ่าน">{show ? <EyeOff size={17} /> : <Eye size={17} />}</button>
+        <button className="password-toggle" type="button" onClick={() => setShow(v => !v)} aria-label={show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}>{show ? <EyeOff size={17} /> : <Eye size={17} />}</button>
       </Field>
       <Field label="ยืนยันรหัสผ่าน" type="password" autoComplete="new-password" placeholder="กรอกรหัสผ่านอีกครั้ง" value={confirm} onChange={e => setConfirm(e.target.value)} required />
       <label className="check-label terms-check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} /><span>ฉันยอมรับข้อกำหนดการใช้งานและนโยบายความเป็นส่วนตัว</span></label>
@@ -228,9 +233,14 @@ function ForgotPasswordPage() {
   const navigate = useNavigate(); const [email, setEmail] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [done, setDone] = useState(false);
   async function submit(event) {
     event.preventDefault(); setError(''); setBusy(true);
-    const { error: requestError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/reset-password` });
-    setBusy(false);
-    if (requestError) setError('ส่งคำขอไม่สำเร็จ กรุณาลองใหม่ภายหลัง'); else setDone(true);
+    try {
+      const { error: requestError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/reset-password` });
+      if (requestError) setError('ส่งคำขอไม่สำเร็จ กรุณาลองใหม่ภายหลัง'); else setDone(true);
+    } catch {
+      setError('เชื่อมต่อบริการกู้คืนรหัสผ่านไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setBusy(false);
+    }
   }
   return <AuthLayout title="กู้คืนรหัสผ่าน" subtitle="เราจะส่งลิงก์เปลี่ยนรหัสผ่านไปยังอีเมลที่คุณกรอก">
     {error && <Notice kind="error">{error}</Notice>}
@@ -245,8 +255,20 @@ function ResetPasswordPage() {
     event.preventDefault(); setError('');
     if (password.length < 8) return setError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
     if (password !== confirm) return setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
-    setBusy(true); const { error: updateError } = await supabase.auth.updateUser({ password }); setBusy(false);
-    if (updateError) setError('ลิงก์อาจหมดอายุแล้ว กรุณาขอลิงก์ใหม่'); else { setDone(true); await supabase.auth.signOut(); }
+    setBusy(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) {
+        setError('ลิงก์อาจหมดอายุแล้ว กรุณาขอลิงก์ใหม่');
+        return;
+      }
+      setDone(true);
+      try { await supabase.auth.signOut(); } catch { /* Password update already succeeded. */ }
+    } catch {
+      setError('เปลี่ยนรหัสผ่านไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อหรือลิงก์กู้คืน');
+    } finally {
+      setBusy(false);
+    }
   }
   return <AuthLayout title="ตั้งรหัสผ่านใหม่" subtitle="สร้างรหัสผ่านใหม่ที่คุณยังไม่เคยใช้กับบัญชีนี้">
     {error && <Notice kind="error">{error}</Notice>}
@@ -490,10 +512,12 @@ function SummaryPage() {
   useEffect(() => { load(); }, [load]);
   async function generate(event) {
     event.preventDefault(); setError(''); setSavedNotice(''); setSummary('');
-    if (!attachment && content.trim().length < 50) { setError('กรุณาใส่เนื้อหาอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์'); return; }
+    const selectedStoredFile = studyFiles.find(file => file.id === storedFileId);
+    const storedBinaryFileId = selectedStoredFile && !selectedStoredFile.mime_type.startsWith('text/') ? selectedStoredFile.id : undefined;
+    if (!attachment && !storedBinaryFileId && content.trim().length < 50) { setError('กรุณาใส่เนื้อหาอย่างน้อย 50 ตัวอักษรหรือเลือกไฟล์ PDF/รูปภาพจากคลัง'); return; }
     setBusy(true);
     try {
-      const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || fileName || 'บทเรียนไม่มีชื่อ', studyFileId: storedFileId && !studyFiles.find(file => file.id === storedFileId)?.mime_type.startsWith('text/') ? storedFileId : undefined, attachment: storedFileId ? null : attachment }, session.access_token);
+      const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || fileName || 'บทเรียนไม่มีชื่อ', studyFileId: storedBinaryFileId, attachment: storedFileId ? null : attachment }, session.access_token);
       setSummary(result.summary); setEditingSummary(false);
     } catch (err) { setError(err.message || 'สรุปบทเรียนไม่สำเร็จ'); }
     finally { setBusy(false); }
@@ -571,7 +595,15 @@ function SummaryPage() {
             {editingSummary
               ? <textarea className="summary-edit-textarea" rows="18" value={summary} onChange={e => setSummary(e.target.value)} aria-label="แก้ไขข้อความสรุป" />
               : <div className="summary-markdown">{summary.split('\n').map((line, i) => line.startsWith('### ') ? <h4 key={i}>{line.replace(/^###\s*/, '')}</h4> : line.startsWith('## ') ? <h3 key={i}>{line.replace(/^##\s*/, '')}</h3> : line.startsWith('# ') ? <h2 key={i}>{line.replace(/^#\s*/, '')}</h2> : line.startsWith('- ') || line.startsWith('* ') ? <p className="summary-bullet" key={i}><span>•</span>{line.slice(2)}</p> : line.trim() ? <p key={i}>{line}</p> : <div key={i} className="summary-space" />)}</div>}
-            <div className="summary-next-step"><div><Lightbulb size={18} /><b>พร้อมทดสอบความเข้าใจหรือยัง?</b></div><p>ใช้เนื้อหาต้นฉบับนี้สร้าง Quick Quiz เพื่อดูว่าหัวข้อไหนควรกลับไปทบทวน</p><button className="text-link plain" onClick={() => { window.sessionStorage.setItem('studyPilotQuizContent', content); if (attachment && !content.trim()) window.alert('หากต้องการสร้าง Quick Quiz จากไฟล์ PDF/รูปภาพนี้ ให้แนบไฟล์เดิมอีกครั้งในหน้า Quick Quiz'); window.location.href = '/app/quiz'; }}>สร้าง Quick Quiz <ArrowRight size={14} /></button></div>
+            <div className="summary-next-step"><div><Lightbulb size={18} /><b>พร้อมทดสอบความเข้าใจหรือยัง?</b></div><p>ใช้เนื้อหาต้นฉบับนี้สร้าง Quick Quiz เพื่อดูว่าหัวข้อไหนควรกลับไปทบทวน</p><button className="text-link plain" onClick={() => {
+              const selectedFile = studyFiles.find(file => file.id === storedFileId);
+              const binaryFileId = selectedFile && !selectedFile.mime_type.startsWith('text/') ? selectedFile.id : '';
+              window.sessionStorage.setItem('studyPilotQuizContent', content);
+              window.sessionStorage.setItem('studyPilotQuizTopic', title.trim() || selectedFile?.file_name || 'บทเรียนทั่วไป');
+              if (binaryFileId) window.sessionStorage.setItem('studyPilotQuizFileId', binaryFileId);
+              else window.sessionStorage.removeItem('studyPilotQuizFileId');
+              window.location.href = '/app/quiz';
+            }}>สร้าง Quick Quiz <ArrowRight size={14} /></button></div>
           </div> : <EmptyState icon={FileText} title="สรุปบทเรียนจะแสดงที่นี่" description="เมื่อสร้างสรุปสำเร็จ คุณสามารถแก้ไข ส่งออก PDF/PNG และบันทึกไว้ใช้ครั้งต่อไปได้" />}
         </section>
       </div>
@@ -591,14 +623,44 @@ function QuizPage() {
   const { session, user } = useAuth(); const [courses, setCourses] = useState([]); const [courseId, setCourseId] = useState(''); const [topic, setTopic] = useState('');
   const [content, setContent] = useState(() => window.sessionStorage.getItem('studyPilotQuizContent') || ''); const [attachment, setAttachment] = useState(null); const [fileName, setFileName] = useState(''); const [storedFileId, setStoredFileId] = useState(''); const [studyFiles, setStudyFiles] = useState([]); const [uploadingFile, setUploadingFile] = useState(false);
   const [count, setCount] = useState('5'); const [questions, setQuestions] = useState([]); const [answers, setAnswers] = useState({}); const [submitted, setSubmitted] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [history, setHistory] = useState([]); const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false);
-  const load = useCallback(async () => { const [c, q, f] = await Promise.all([supabase.from('courses').select('id,name').order('name'), supabase.from('quiz_attempts').select('*').order('created_at', { ascending: false }).limit(5), supabase.from('study_files').select('id,file_name,mime_type,size_bytes,storage_path,course_id,created_at').order('created_at', { ascending: false }).limit(100)]); setCourses(c.data || []); setHistory(q.data || []); setStudyFiles(f.data || []); }, []);
+  const load = useCallback(async () => {
+    const [c, q, f] = await Promise.all([
+      supabase.from('courses').select('id,name').order('name'),
+      supabase.from('quiz_attempts').select('*').order('created_at', { ascending: false }).limit(5),
+      supabase.from('study_files').select('id,file_name,mime_type,size_bytes,storage_path,course_id,created_at').order('created_at', { ascending: false }).limit(100),
+    ]);
+    const loadedFiles = f.data || [];
+    setCourses(c.data || []);
+    setHistory(q.data || []);
+    setStudyFiles(loadedFiles);
+
+    // Transfer the source selected in AI Study Summary into Quick Quiz once.
+    const queuedFileId = window.sessionStorage.getItem('studyPilotQuizFileId');
+    const queuedTopic = window.sessionStorage.getItem('studyPilotQuizTopic');
+    if (queuedTopic) setTopic(previous => previous.trim() ? previous : queuedTopic);
+    if (queuedFileId) {
+      const queuedFile = loadedFiles.find(file => file.id === queuedFileId);
+      if (queuedFile && !queuedFile.mime_type.startsWith('text/')) {
+        setStoredFileId(queuedFile.id);
+        setFileName(queuedFile.file_name);
+        if (queuedFile.course_id) setCourseId(queuedFile.course_id);
+      } else {
+        setError('ไฟล์ต้นฉบับไม่อยู่ในคลังส่วนตัวแล้ว กรุณาเลือกไฟล์อีกครั้ง');
+      }
+    }
+    window.sessionStorage.removeItem('studyPilotQuizFileId');
+    window.sessionStorage.removeItem('studyPilotQuizTopic');
+    window.sessionStorage.removeItem('studyPilotQuizContent');
+  }, []);
   useEffect(() => { load(); }, [load]);
   async function generate(event) {
     event.preventDefault(); setError(''); setQuestions([]); setAnswers({}); setSubmitted(false); setSaved(false);
-    if (!attachment && content.trim().length < 50) return setError('กรุณาใส่เนื้อหาบทเรียนอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์');
+    const selectedStoredFile = studyFiles.find(file => file.id === storedFileId);
+    const storedBinaryFileId = selectedStoredFile && !selectedStoredFile.mime_type.startsWith('text/') ? selectedStoredFile.id : undefined;
+    if (!attachment && !storedBinaryFileId && content.trim().length < 50) return setError('กรุณาใส่เนื้อหาบทเรียนอย่างน้อย 50 ตัวอักษรหรือเลือกไฟล์ PDF/รูปภาพจากคลัง');
     setBusy(true);
     try {
-      const result = await callAI('/api/ai/quiz', { content: content.trim(), topic: topic.trim() || fileName || 'บทเรียนทั่วไป', count: Number(count), studyFileId: storedFileId && !studyFiles.find(file => file.id === storedFileId)?.mime_type.startsWith('text/') ? storedFileId : undefined, attachment: storedFileId ? null : attachment }, session.access_token);
+      const result = await callAI('/api/ai/quiz', { content: content.trim(), topic: topic.trim() || fileName || 'บทเรียนทั่วไป', count: Number(count), studyFileId: storedBinaryFileId, attachment: storedFileId ? null : attachment }, session.access_token);
       setQuestions(result.questions || []); if (!result.questions?.length) setError('AI ยังสร้างคำถามที่ใช้ได้ไม่สำเร็จ กรุณาลองใหม่');
     } catch (err) { setError(err.message || 'สร้าง Quiz ไม่สำเร็จ'); } finally { setBusy(false); }
   }
