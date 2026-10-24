@@ -828,3 +828,99 @@ code { padding: 2px 5px; border-radius: 5px; background: #f3f4f9; color: #6857bc
   .toast { top: 12px; right: 12px; }
   .data-table th, .data-table td { padding-left: 12px; padding-right: 12px; }
 }
+
+
+/* Buddy AI study file uploads, editable summaries, and export controls */
+.file-selection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: -2px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #dce4f3;
+  border-radius: 10px;
+  background: #f7f9fd;
+  color: #34415c;
+  font-size: 13px;
+}
+.file-selection > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.summary-form-actions,
+.summary-export-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.summary-export-actions {
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.summary-export-actions .btn {
+  white-space: nowrap;
+}
+.summary-edit-textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  padding: 16px;
+  border: 1px solid var(--border, #dce2ed);
+  border-radius: 12px;
+  color: var(--text, #28334a);
+  background: var(--surface, #fff);
+  font: inherit;
+  line-height: 1.75;
+}
+.recent-material-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.recent-material-entry .recent-material {
+  flex: 1;
+  min-width: 0;
+}
+.recent-material-entry .recent-material > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.recent-material-entry .recent-material b,
+.recent-material-entry .recent-material small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-material {
+  min-width: 0;
+}
+.recent-delete {
+  flex: 0 0 auto;
+}
+.recent-materials > .search-field {
+  margin: 0 0 12px;
+}
+@media (max-width: 760px) {
+  .summary-form-actions,
+  .summary-export-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .summary-form-actions .btn,
+  .summary-export-actions .btn {
+    flex: 1 1 auto;
+  }
+  .summary-result-panel > .panel-heading {
+    align-items: flex-start;
+  }
+  .file-selection {
+    flex-wrap: wrap;
+  }
+}
