@@ -9,8 +9,13 @@ const app = express();
 const PORT = Number(process.env.PORT || 8787);
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-const AI_PROVIDER = (process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic')).trim().toLowerCase();
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_KEYS = [
+  process.env.GEMINI_API_KEY_1 || process.env.GEMINI_API_KEY || '',
+  process.env.GEMINI_API_KEY_2 || '',
+  process.env.GEMINI_API_KEY_3 || '',
+  process.env.GEMINI_API_KEY_4 || '',
+].map((value) => value.trim());
+const AI_PROVIDER = (process.env.AI_PROVIDER || (GEMINI_KEYS.some(Boolean) ? 'gemini' : 'anthropic')).trim().toLowerCase();
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
@@ -68,55 +73,191 @@ function parseJson(text) {
   }
 }
 
+const GEMINI_KEY_COOLDOWN_MS = 60_000;
+const GEMINI_AUTH_COOLDOWN_MS = 5 * 60_000;
+const GEMINI_MAX_5XX_RETRIES = 1;
+const GEMINI_REQUEST_TIMEOUT_MS = 45_000;
+const geminiKeyState = GEMINI_KEYS.map((key, index) => ({
+  index: index + 1,
+  configured: Boolean(key),
+  cooldownUntil: 0,
+  consecutiveFailures: 0,
+  calls: 0,
+  switches: 0,
+}));
+let nextGeminiKeyIndex = 0;
+
+function geminiErrorInfo(payload, status) {
+  const providerStatus = String(payload?.error?.status || '').toUpperCase();
+  const message = String(payload?.error?.message || '').slice(0, 500);
+  const quota = /quota|rate.?limit|resource.?exhausted|requests per|tokens per/i.test(message)
+    || providerStatus === 'RESOURCE_EXHAUSTED';
+  if (status === 429) return { kind: quota ? 'quota_or_rate_limit' : 'http_429', retryKey: true, cooldownMs: GEMINI_KEY_COOLDOWN_MS };
+  if (status === 401 || status === 403) return { kind: status === 401 ? 'invalid_key_or_auth' : 'permission_or_auth', retryKey: true, cooldownMs: GEMINI_AUTH_COOLDOWN_MS };
+  if (status >= 500 && status <= 599) return { kind: 'provider_5xx', retryKey: true, cooldownMs: GEMINI_KEY_COOLDOWN_MS };
+  if (status === 400 || status === 404 || status === 422) return { kind: 'request_or_model_error', retryKey: false, cooldownMs: 0 };
+  return { kind: 'http_' + status, retryKey: false, cooldownMs: 0 };
+}
+
+function pickGeminiKey(excluded = new Set()) {
+  const now = Date.now();
+  const configured = geminiKeyState.filter((state, index) => GEMINI_KEYS[index] && !excluded.has(index));
+  if (!configured.length) return null;
+  for (let offset = 0; offset < GEMINI_KEYS.length; offset += 1) {
+    const index = (nextGeminiKeyIndex + offset) % GEMINI_KEYS.length;
+    const state = geminiKeyState[index];
+    if (GEMINI_KEYS[index] && !excluded.has(index) && state.cooldownUntil <= now) {
+      nextGeminiKeyIndex = (index + 1) % GEMINI_KEYS.length;
+      return { index, key: GEMINI_KEYS[index], state };
+    }
+  }
+  const next = configured
+    .map((state) => ({ state, index: state.index - 1 }))
+    .sort((a, b) => a.state.cooldownUntil - b.state.cooldownUntil)[0];
+  if (!next) return null;
+  nextGeminiKeyIndex = (next.index + 1) % GEMINI_KEYS.length;
+  return { index: next.index, key: GEMINI_KEYS[next.index], state: next.state };
+}
+
+function cooldownGeminiKey(state, duration) {
+  state.cooldownUntil = Math.max(state.cooldownUntil, Date.now() + duration);
+  state.consecutiveFailures += 1;
+}
+
+function logGeminiEvent(event, state, details = {}) {
+  console.info('[gemini-keys]', JSON.stringify({
+    event,
+    keyNumber: state?.index ?? null,
+    at: new Date().toISOString(),
+    ...details,
+  }));
+}
+
+function safeGeminiUnavailable() {
+  const err = new Error('บริการ AI ไม่พร้อมใช้งานชั่วคราว กรุณารอสักครู่แล้วลองใหม่');
+  err.status = 503;
+  err.expose = true;
+  return err;
+}
+
 async function askGemini(system, prompt, maxTokens = 1800, attachment = null) {
-  if (!GEMINI_API_KEY) {
-    const err = new Error('ยังไม่ได้ตั้งค่า Gemini API กรุณาสร้าง API Key จาก Google AI Studio แล้วใส่ใน GEMINI_API_KEY ในไฟล์ .env');
+  const configuredCount = GEMINI_KEYS.filter(Boolean).length;
+  if (!configuredCount) {
+    console.error('[gemini-keys]', JSON.stringify({
+      event: 'no_keys_configured',
+      at: new Date().toISOString(),
+      configuredKeys: 0,
+    }));
+    const err = new Error('ยังไม่ได้ตั้งค่า Gemini API Keys ใน Environment Variables ของ Backend');
     err.status = 503;
+    err.expose = true;
     throw err;
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': GEMINI_API_KEY,
-    },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: prompt }, ...(attachment ? [{ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } }] : [])] }],
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
-    }),
-    signal: AbortSignal.timeout(45_000),
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(GEMINI_MODEL) + ':generateContent';
+  const attempted = new Set();
+  let lastFailureKind = 'unknown';
+  let totalAttempts = 0;
+
+  while (attempted.size < configuredCount && totalAttempts < configuredCount * (GEMINI_MAX_5XX_RETRIES + 1)) {
+    const selected = pickGeminiKey(attempted);
+    if (!selected) break;
+    const { index, key, state } = selected;
+    attempted.add(index);
+    state.calls += 1;
+    totalAttempts += 1;
+    logGeminiEvent('selected', state, { configuredKeys: configuredCount, attempt: totalAttempts });
+
+    let response;
+    let payload = {};
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': key,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }, ...(attachment ? [{ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } }] : [])] }],
+          generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
+        }),
+        signal: AbortSignal.timeout(GEMINI_REQUEST_TIMEOUT_MS),
+      });
+      payload = await response.json().catch(() => ({}));
+    } catch (networkError) {
+      lastFailureKind = networkError?.name === 'TimeoutError' || networkError?.name === 'AbortError'
+        ? 'timeout_outcome_unknown'
+        : 'network_error';
+      cooldownGeminiKey(state, GEMINI_KEY_COOLDOWN_MS);
+      logGeminiEvent('network_failure', state, { kind: lastFailureKind, attempt: totalAttempts, cooldownMs: GEMINI_KEY_COOLDOWN_MS });
+      continue;
+    }
+
+    if (response.ok) {
+      const text = (payload.candidates?.[0]?.content?.parts || [])
+        .filter((part) => typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('\n')
+        .trim();
+      if (!text) {
+        const blockReason = String(payload.promptFeedback?.blockReason || '');
+        logGeminiEvent('empty_or_blocked_response', state, { blockReason: blockReason || 'none', attempt: totalAttempts });
+        const err = new Error('Gemini ไม่ได้ส่งข้อความกลับมา อาจเกิดจากข้อจำกัดความปลอดภัยหรือรูปแบบคำขอ');
+        err.status = 502;
+        err.expose = true;
+        throw err;
+      }
+      state.consecutiveFailures = 0;
+      state.cooldownUntil = 0;
+      logGeminiEvent('success', state, { attempt: totalAttempts, switches: Math.max(0, attempted.size - 1) });
+      return text;
+    }
+
+    const info = geminiErrorInfo(payload, response.status);
+    lastFailureKind = info.kind;
+    logGeminiEvent('provider_failure', state, {
+      status: response.status,
+      kind: info.kind,
+      attempt: totalAttempts,
+      switches: Math.max(0, attempted.size - 1),
+    });
+
+    if (!info.retryKey) {
+      const err = new Error(
+        response.status === 400 || response.status === 404 || response.status === 422
+          ? 'คำขอ Gemini หรือชื่อโมเดลไม่ถูกต้อง กรุณาตรวจสอบ GEMINI_MODEL และรูปแบบคำขอ'
+          : 'Gemini ปฏิเสธคำขอ กรุณาตรวจสอบการตั้งค่าและสิทธิ์ใช้งาน API'
+      );
+      err.status = response.status === 400 || response.status === 404 || response.status === 422 ? 400 : 502;
+      err.expose = true;
+      throw err;
+    }
+
+    cooldownGeminiKey(state, info.cooldownMs);
+    if (response.status >= 500 && response.status <= 599 && totalAttempts < configuredCount * (GEMINI_MAX_5XX_RETRIES + 1)) {
+      const base = 250 * (2 ** Math.min(state.consecutiveFailures - 1, 2));
+      const delay = base + Math.floor(Math.random() * 200);
+      logGeminiEvent('retry_backoff', state, { attempt: totalAttempts, retryInMs: delay });
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  const cooldownStates = geminiKeyState
+    .filter((state, index) => GEMINI_KEYS[index])
+    .map((state) => ({
+      keyNumber: state.index,
+      status: state.cooldownUntil > Date.now() ? 'cooldown' : 'available',
+      cooldownUntil: state.cooldownUntil > Date.now() ? new Date(state.cooldownUntil).toISOString() : null,
+    }));
+  logGeminiEvent('all_keys_failed', null, {
+    configuredKeys: configuredCount,
+    attemptedKeys: attempted.size,
+    attempts: totalAttempts,
+    lastFailureKind,
+    keyStates: cooldownStates,
   });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(
-      response.status === 429
-        ? 'โควตา Gemini ฟรีอาจเต็มหรือมีคำขอมากเกินไป กรุณารอสักครู่แล้วลองใหม่'
-        : response.status === 401 || response.status === 403
-          ? 'Gemini API Key ไม่ถูกต้องหรือไม่มีสิทธิ์ใช้งาน กรุณาตรวจ GEMINI_API_KEY และสถานะโปรเจกต์ใน Google AI Studio'
-          : response.status === 400 || response.status === 404
-            ? 'คำขอ Gemini ไม่ถูกต้อง กรุณาตรวจชื่อ GEMINI_MODEL และการตั้งค่า API'
-            : 'Gemini ประมวลผลไม่สำเร็จ กรุณาตรวจ API Key และลองใหม่'
-    );
-    err.status = response.status === 429 ? 429 : 502;
-    err.expose = true; // This message is deliberately sanitized; never expose raw provider payloads.
-    throw err;
-  }
-
-  const text = (payload.candidates?.[0]?.content?.parts || [])
-    .filter((part) => typeof part.text === 'string')
-    .map((part) => part.text)
-    .join('\n')
-    .trim();
-  if (!text) {
-    const err = new Error('Gemini ไม่ได้ส่งข้อความกลับมา อาจเกิดจากข้อจำกัดความปลอดภัยหรือรูปแบบคำขอ');
-    err.status = 502;
-    throw err;
-  }
-  return text;
+  throw safeGeminiUnavailable();
 }
 
 async function askAI(system, prompt, maxTokens = 1800, attachment = null) {
@@ -253,7 +394,7 @@ app.listen(PORT, () => {
   // Do not print secret values to the terminal.
   console.log(`Buddy AI API listening on http://localhost:${PORT}`);
   if (!SUPABASE_URL || !SUPABASE_KEY) console.warn('Supabase server variables are missing; authenticated AI endpoints will be unavailable.');
-  if (AI_PROVIDER === 'gemini' && !GEMINI_API_KEY) console.warn('GEMINI_API_KEY is missing; AI summary and Quiz endpoints will return a setup message.');
+  if (AI_PROVIDER === 'gemini' && !GEMINI_KEYS.some(Boolean)) console.warn('Gemini API keys are missing; configure GEMINI_API_KEY_1 through GEMINI_API_KEY_4 in the backend environment.');
   if (AI_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is missing; AI summary and Quiz endpoints will return a setup message.');
   if (!['gemini', 'anthropic'].includes(AI_PROVIDER)) console.warn('AI_PROVIDER should be set to gemini or anthropic.');
 });
