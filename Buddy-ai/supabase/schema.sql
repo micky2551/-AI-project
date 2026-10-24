@@ -1,4 +1,4 @@
--- StudyPilot AI schema
+-- Buddy AI schema
 -- Run this entire file in Supabase SQL Editor using a trusted project owner account.
 -- This schema uses Supabase Auth + Row Level Security (RLS).
 
