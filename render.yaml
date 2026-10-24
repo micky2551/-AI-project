@@ -1,0 +1,26 @@
+# Buddy AI API service on Render.
+# Uses the existing app code under Buddy-ai/ and keeps secrets out of source control.
+services:
+  - type: web
+    name: buddy-ai-api
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: Buddy-ai
+    buildCommand: npm ci
+    startCommand: npm run dev:api
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: APP_ORIGIN
+        value: https://ai-project-zah9.onrender.com
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: SUPABASE_URL
+        value: https://xloxsjlaffdosungxwek.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
