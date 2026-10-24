@@ -1,6 +1,6 @@
-# StudyPilot AI
+# Buddy AI
 
-เว็บแอปวางแผนการเรียนสำหรับนักศึกษา พร้อม Email Authentication, Student Dashboard, Admin Dashboard, ตารางงาน, AI Summary และ Quick Quiz
+เว็บแอปวางแผนการเรียนสำหรับนักศึกษา พร้อม Email Authentication, Student Dashboard, Admin Dashboard, ตารางงาน, AI Study Summary และ Quick Quiz
 
 > **สถานะปัจจุบัน:** เป็น MVP starter ที่มีโค้ด Frontend, API server และ SQL schema ให้ติดตั้งและเชื่อมบริการจริง ยังต้องตั้งค่า Supabase และ Gemini API ก่อนที่ Login/Database/AI จะใช้งานได้จริง
 
@@ -12,8 +12,8 @@
 - Forgot Password / Reset Password / Logout
 - Dashboard สรุปงาน รายวิชา และผล Quiz ของบัญชีตัวเอง
 - จัดการรายวิชาและงาน/กิจกรรม พร้อมสถานะ ความสำคัญ กำหนดเวลา และตัวล็อกเวลา
-- สร้างสรุปบทเรียนด้วย Gemini API (หรือ Claude หากตั้งค่า Anthropic) และบันทึกลงฐานข้อมูล
-- สร้าง Quick Quiz จากเนื้อหา พร้อมเฉลย คะแนน และหัวข้อที่ตอบผิด
+- สร้างสรุปบทเรียนด้วย Gemini API (หรือ Claude หากตั้งค่า Anthropic) รองรับข้อความ ไฟล์ PDF/รูปภาพ และไฟล์ข้อความ พร้อมค้นหา/แก้ไข/ลบสรุปที่บันทึกไว้และส่งออก PDF/PNG
+- สร้าง Quick Quiz จากข้อความ ไฟล์ PDF/รูปภาพ หรือไฟล์ข้อความ พร้อมเฉลย คะแนน และหัวข้อที่ตอบผิด
 - ดูประวัติ Quiz และสถิติพัฒนาการ
 - แก้ไขชื่อที่ใช้แสดงและส่งลิงก์เปลี่ยนรหัสผ่าน
 
