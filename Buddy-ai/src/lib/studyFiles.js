@@ -232,7 +232,7 @@ function buildImagePdf(canvases) {
   return new Blob(chunks, { type: 'application/pdf' });
 }
 
-export function downloadSummaryExport(summary, title, format) {
+export async function downloadSummaryExport(summary, title, format) {
   if (!String(summary || '').trim()) throw new Error('ยังไม่มีสรุปบทเรียนสำหรับส่งออก');
   const measureCanvas = document.createElement('canvas');
   const ctx = measureCanvas.getContext('2d');
@@ -273,7 +273,7 @@ export function downloadSummaryExport(summary, title, format) {
       fullCtx.fillText(line.text, 80, y, 1040);
       y += line.height;
     }
-    saveBlob(awaitCanvasBlob(full), safeFilename(title, '.png'));
+    saveBlob(await awaitCanvasBlob(full), safeFilename(title, '.png'));
     return;
   }
   saveBlob(buildImagePdf(pages), safeFilename(title, '.pdf'));
