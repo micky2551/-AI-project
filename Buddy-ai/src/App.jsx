@@ -470,7 +470,7 @@ function SummaryPage() {
   const [courses, setCourses] = useState([]); const [courseId, setCourseId] = useState('');
   const [title, setTitle] = useState(''); const [content, setContent] = useState(''); const [summary, setSummary] = useState('');
   const [attachment, setAttachment] = useState(null); const [fileName, setFileName] = useState('');
-  const [selectedMaterialId, setSelectedMaterialId] = useState(''); const [editingSummary, setEditingSummary] = useState(false); const [searchMaterials, setSearchMaterials] = useState('');
+  const [selectedMaterialId, setSelectedMaterialId] = useState(''); const [editingSummary, setEditingSummary] = useState(false); const [searchMaterials, setSearchMaterials] = useState(''); const [sortMaterials, setSortMaterials] = useState('newest');
   const [busy, setBusy] = useState(false); const [saving, setSaving] = useState(false); const [error, setError] = useState(''); const [savedNotice, setSavedNotice] = useState('');
   const [materials, setMaterials] = useState([]); const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
@@ -532,7 +532,7 @@ function SummaryPage() {
     setSavedNotice('ลบสรุปแล้ว');
   }
   function clearSummaryForm() { setSelectedMaterialId(''); setTitle(''); setContent(''); setSummary(''); setCourseId(''); setAttachment(null); setFileName(''); setEditingSummary(false); setError(''); setSavedNotice(''); }
-  const filteredMaterials = materials.filter(item => (item.title || '').toLowerCase().includes(searchMaterials.toLowerCase()) || (item.summary || '').toLowerCase().includes(searchMaterials.toLowerCase()));
+  const filteredMaterials = materials.filter(item => (item.title || '').toLowerCase().includes(searchMaterials.toLowerCase()) || (item.summary || '').toLowerCase().includes(searchMaterials.toLowerCase())).sort((a, b) => sortMaterials === 'oldest' ? new Date(a.created_at) - new Date(b.created_at) : sortMaterials === 'title-asc' ? (a.title || '').localeCompare(b.title || '', 'th') : sortMaterials === 'title-desc' ? (b.title || '').localeCompare(a.title || '', 'th') : new Date(b.created_at) - new Date(a.created_at));
   return <>
     <PageHeader eyebrow="LEARN WITH CLARITY" title="สรุปบทเรียนด้วย AI" description="วางข้อความหรือแนบไฟล์ PDF/รูปภาพ แล้วเปลี่ยนเป็นสรุปที่บันทึกและกลับมาแก้ไขได้" action={<div className="ai-status"><span className="ai-status-dot" /><Sparkles size={15} /> AI assistant</div>} />
     <div className="summary-layout">
@@ -573,7 +573,7 @@ function SummaryPage() {
         <section className="panel summary-tips"><div className="tips-icon"><Lightbulb size={20} /></div><h3>เคล็ดลับให้สรุปดีขึ้น</h3><ul><li>แบ่งเนื้อหาเป็นบทหรือหัวข้อ</li><li>ใส่คำจำกัดความและตัวอย่างที่อาจออกสอบ</li><li>ตรวจทานกับเอกสารต้นฉบับเสมอ</li><li>อย่าใส่รหัสผ่านหรือข้อมูลส่วนตัวในเอกสาร</li></ul></section>
         <section className="panel recent-materials">
           <div className="panel-heading"><div><h3>สรุปที่บันทึกไว้</h3><p>{materials.length} รายการล่าสุดที่ค้นหาได้</p></div><BookMarked size={18} className="muted-icon" /></div>
-          <div className="search-field"><Search size={15} /><input value={searchMaterials} onChange={e => setSearchMaterials(e.target.value)} placeholder="ค้นหาชื่อหรือเนื้อหาสรุป…" /></div>
+          <div className="materials-toolbar"><div className="search-field"><Search size={15} /><input value={searchMaterials} onChange={e => setSearchMaterials(e.target.value)} placeholder="ค้นหาชื่อหรือเนื้อหาสรุป…" /></div><select className="materials-sort" value={sortMaterials} onChange={e => setSortMaterials(e.target.value)} aria-label="เรียงลำดับสรุป"><option value="newest">ใหม่ล่าสุด</option><option value="oldest">เก่าสุด</option><option value="title-asc">ชื่อ A–Z</option><option value="title-desc">ชื่อ Z–A</option></select></div>
           {loading ? <div className="inline-loading"><LoaderCircle size={18} className="spin" /></div> : filteredMaterials.length ? <div className="recent-material-list">{filteredMaterials.map(material => <div className="recent-material-entry" key={material.id}><button className="recent-material" onClick={() => viewMaterial(material)}><div className="recent-material-icon"><FileText size={16} /></div><div><b>{material.title}</b><small>{formatDate(material.created_at)}</small></div><ChevronRight size={15} /></button><button className="icon-btn danger-hover recent-delete" onClick={() => deleteMaterial(material)} aria-label={'ลบสรุป ' + material.title} title="ลบสรุป"><Trash2 size={15} /></button></div>)}</div> : <EmptyState icon={FileText} title="ไม่พบสรุปบทเรียน" description="บันทึกสรุปแรกของคุณ แล้วจะค้นหาและกลับมาแก้ไขได้จากที่นี่" />}
         </section>
       </aside>
