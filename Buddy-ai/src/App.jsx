@@ -14,13 +14,14 @@ import {
 import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 import { formatDate, formatDateTime, timeGreeting, initials, sortByDueDate, localDateTimeInput } from './lib/format.js';
+import { readStudyFile, downloadSummaryExport } from './lib/studyFiles.js';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8787').replace(/\/$/, '');
 
 function Brand({ compact = false }) {
   return <div className={`brand ${compact ? 'brand-compact' : ''}`}>
     <div className="brand-mark"><BrainCircuit size={21} strokeWidth={2.2} /></div>
-    {!compact && <div className="brand-copy"><strong>StudyPilot <span>AI</span></strong><small>YOUR STUDY, IN CONTROL</small></div>}
+    {!compact && <div className="brand-copy"><strong>Buddy <span>AI</span></strong><small>YOUR STUDY, IN CONTROL</small></div>}
   </div>;
 }
 
@@ -105,7 +106,7 @@ function AuthLayout({ title, subtitle, children, footnote }) {
     </div>
     <div className="auth-form-side">
       <div className="auth-form-mobile-brand"><Brand /></div>
-      <div className="auth-form-wrap"><div className="auth-heading"><div className="eyebrow">WELCOME TO STUDYPILOT</div><h1>{title}</h1><p>{subtitle}</p></div>{children}{footnote && <div className="auth-footnote">{footnote}</div>}</div>
+      <div className="auth-form-wrap"><div className="auth-heading"><div className="eyebrow">WELCOME TO BUDDY AI</div><h1>{title}</h1><p>{subtitle}</p></div>{children}{footnote && <div className="auth-footnote">{footnote}</div>}</div>
       <div className="auth-bottom"><ShieldCheck size={15} /> บัญชีของคุณได้รับการปกป้องด้วยระบบยืนยันตัวตน</div>
     </div>
   </div>;
@@ -456,28 +457,119 @@ async function callAI(path, payload, token) {
   return body;
 }
 
+async function applyStudyFile(file, setContent, setAttachment, setFileName, setError) {
+  if (!file) return;
+  try {
+    const loaded = await readStudyFile(file);
+    setContent(loaded.content); setAttachment(loaded.attachment); setFileName(loaded.fileName); setError('');
+  } catch (error) { setError(error instanceof Error ? error.message : 'อ่านไฟล์ไม่สำเร็จ'); }
+}
+
 function SummaryPage() {
-  const { session, user } = useAuth(); const [courses, setCourses] = useState([]); const [courseId, setCourseId] = useState(''); const [title, setTitle] = useState(''); const [content, setContent] = useState(''); const [summary, setSummary] = useState(''); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState(false); const [error, setError] = useState(''); const [savedNotice, setSavedNotice] = useState(''); const [materials, setMaterials] = useState([]); const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => { setLoading(true); const [c, m] = await Promise.all([supabase.from('courses').select('id,name').order('name'), supabase.from('learning_materials').select('id,title,summary,created_at,course_id').order('created_at', { ascending: false }).limit(8)]); setCourses(c.data || []); setMaterials(m.data || []); setLoading(false); }, []);
+  const { session, user } = useAuth();
+  const [courses, setCourses] = useState([]); const [courseId, setCourseId] = useState('');
+  const [title, setTitle] = useState(''); const [content, setContent] = useState(''); const [summary, setSummary] = useState('');
+  const [attachment, setAttachment] = useState(null); const [fileName, setFileName] = useState('');
+  const [selectedMaterialId, setSelectedMaterialId] = useState(''); const [editingSummary, setEditingSummary] = useState(false); const [searchMaterials, setSearchMaterials] = useState('');
+  const [busy, setBusy] = useState(false); const [saving, setSaving] = useState(false); const [error, setError] = useState(''); const [savedNotice, setSavedNotice] = useState('');
+  const [materials, setMaterials] = useState([]); const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [c, m] = await Promise.all([
+      supabase.from('courses').select('id,name').order('name'),
+      supabase.from('learning_materials').select('id,title,summary,source_text,created_at,course_id').order('created_at', { ascending: false }).limit(100),
+    ]);
+    setCourses(c.data || []); setMaterials(m.data || []);
+    if (c.error || m.error) setError('โหลดรายการรายวิชาหรือสรุปที่บันทึกไว้ไม่สำเร็จ กรุณาตรวจสอบสิทธิ์ฐานข้อมูล');
+    setLoading(false);
+  }, []);
   useEffect(() => { load(); }, [load]);
   async function generate(event) {
     event.preventDefault(); setError(''); setSavedNotice(''); setSummary('');
-    if (content.trim().length < 50) { setError('กรุณาใส่เนื้อหาอย่างน้อย 50 ตัวอักษร เพื่อให้ AI สรุปได้มีประโยชน์'); return; }
-    setBusy(true); try { const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || 'บทเรียนไม่มีชื่อ' }, session.access_token); setSummary(result.summary); } catch (err) { setError(err.message || 'สรุปบทเรียนไม่สำเร็จ'); } finally { setBusy(false); }
+    if (!attachment && content.trim().length < 50) { setError('กรุณาใส่เนื้อหาอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์'); return; }
+    setBusy(true);
+    try {
+      const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || fileName || 'บทเรียนไม่มีชื่อ', attachment }, session.access_token);
+      setSummary(result.summary); setEditingSummary(false);
+    } catch (err) { setError(err.message || 'สรุปบทเรียนไม่สำเร็จ'); }
+    finally { setBusy(false); }
   }
   async function saveSummary() {
-    if (!summary) return; setSaving(true); setError('');
-    const { error: saveError } = await supabase.from('learning_materials').insert({ user_id: user.id, course_id: courseId || null, title: title.trim() || 'สรุปบทเรียน', source_text: content.trim(), summary });
-    setSaving(false); if (saveError) setError('สรุปแล้ว แต่บันทึกไม่สำเร็จ กรุณาตรวจสอบฐานข้อมูล'); else { setSavedNotice('บันทึกสรุปไว้ในบัญชีของคุณแล้ว'); load(); }
+    if (!summary.trim()) return;
+    setSaving(true); setError(''); setSavedNotice('');
+    const titleValue = title.trim() || 'สรุปบทเรียน';
+    const sourceText = content.trim() || (attachment ? '[ไฟล์แนบ: ' + (fileName || attachment.name) + ']' : '');
+    const row = { title: titleValue, course_id: courseId || null, source_text: sourceText, summary: summary.trim() };
+    const result = selectedMaterialId
+      ? await supabase.from('learning_materials').update(row).eq('id', selectedMaterialId).select('id').maybeSingle()
+      : await supabase.from('learning_materials').insert({ ...row, user_id: user.id }).select('id').single();
+    setSaving(false);
+    if (result.error || !result.data?.id) { setError('บันทึกสรุปไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและสิทธิ์ฐานข้อมูล'); return; }
+    setSelectedMaterialId(result.data.id); setSavedNotice('บันทึกสรุปในบัญชีของคุณแล้ว'); setEditingSummary(false);
+    await load();
   }
-  function viewMaterial(material) { setTitle(material.title); setSummary(material.summary || ''); setContent(''); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-  return <><PageHeader eyebrow="LEARN WITH CLARITY" title="สรุปบทเรียนด้วย AI" description="วางเนื้อหาจากเอกสารการเรียน แล้วเปลี่ยนเป็นสรุปที่อ่านทบทวนได้ง่าย" action={<div className="ai-status"><span className="ai-status-dot" /><Sparkles size={15} /> AI assistant</div>} />
-    <div className="summary-layout"><div className="summary-main-column"><section className="panel summary-input-panel"><div className="panel-heading"><div><h3><WandSparkles size={18} /> สร้างสรุปใหม่</h3><p>เริ่มจากเนื้อหาที่คุณต้องการทำความเข้าใจ</p></div><div className="ai-mini-label"><Sparkles size={13} /> AI POWERED</div></div>
-      {error && <Notice kind="error">{error}</Notice>}{savedNotice && <Notice kind="success">{savedNotice}</Notice>}
-      <form onSubmit={generate} className="summary-form"><Field label="ชื่อบทเรียน" placeholder="เช่น C++ — เงื่อนไขและการวนซ้ำ" value={title} onChange={e => setTitle(e.target.value)} /><Field label="รายวิชา"><select value={courseId} onChange={e => setCourseId(e.target.value)}><option value="">เลือกภายหลัง / ไม่ระบุ</option>{courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><Field label="เนื้อหาบทเรียน" hint={`${content.length.toLocaleString()} ตัวอักษร · วางข้อความจากเอกสารหรือโน้ตของคุณ`}><textarea className="summary-textarea" rows="12" placeholder="วางเนื้อหาบทเรียนตรงนี้…\n\nตัวอย่าง: ตัวแปรในภาษา C++ ใช้สำหรับเก็บข้อมูล โดยแต่ละตัวแปรมีชนิดข้อมูล เช่น int, float, double, char และ string..." value={content} onChange={e => setContent(e.target.value)} /></Field><div className="summary-input-footer"><span><ShieldCheck size={14} /> ใช้เนื้อหาเท่าที่จำเป็นต่อการสรุป</span><Button type="submit" loading={busy}><Sparkles size={16} /> สร้างสรุปด้วย AI</Button></div></form>
-    </section><section className="panel summary-result-panel"><div className="panel-heading"><div><h3><FileText size={18} /> สรุปบทเรียน</h3><p>เนื้อหาที่ AI สร้างจากข้อความที่คุณส่ง</p></div>{summary && <Button size="sm" variant="secondary" onClick={saveSummary} loading={saving}><Check size={14} /> บันทึกสรุป</Button>}</div>
-      {summary ? <div className="summary-output"><div className="summary-output-meta"><div className="summary-output-icon"><Sparkles size={17} /></div><div><strong>{title.trim() || 'สรุปบทเรียน'}</strong><small>AI-generated summary · โปรดตรวจทานกับเอกสารต้นฉบับ</small></div></div><div className="summary-markdown">{summary.split('\n').map((line, i) => line.startsWith('### ') ? <h4 key={i}>{line.replace(/^###\s*/, '')}</h4> : line.startsWith('## ') ? <h3 key={i}>{line.replace(/^##\s*/, '')}</h3> : line.startsWith('# ') ? <h2 key={i}>{line.replace(/^#\s*/, '')}</h2> : line.startsWith('- ') || line.startsWith('* ') ? <p className="summary-bullet" key={i}><span>•</span>{line.slice(2)}</p> : line.trim() ? <p key={i}>{line}</p> : <div key={i} className="summary-space" />)}</div><div className="summary-next-step"><div><Lightbulb size={18} /><b>พร้อมทดสอบความเข้าใจหรือยัง?</b></div><p>ใช้เนื้อหาต้นฉบับนี้สร้าง Quick Quiz เพื่อดูว่าหัวข้อไหนควรกลับไปทบทวน</p><button className="text-link plain" onClick={() => { window.sessionStorage.setItem('studyPilotQuizContent', content); window.location.href = '/app/quiz'; }}>สร้าง Quick Quiz <ArrowRight size={14} /></button></div></div> : <EmptyState icon={FileText} title="สรุปบทเรียนจะแสดงที่นี่" description="เมื่อสร้างสรุปสำเร็จ คุณสามารถอ่านทบทวนและบันทึกไว้ใช้ครั้งต่อไปได้" />}
-    </section></div><aside className="summary-side-column"><section className="panel summary-tips"><div className="tips-icon"><Lightbulb size={20} /></div><h3>เคล็ดลับให้สรุปดีขึ้น</h3><ul><li>แบ่งเนื้อหาเป็นบทหรือหัวข้อ</li><li>ใส่คำจำกัดความและตัวอย่างที่อาจออกสอบ</li><li>ตรวจทานกับเอกสารต้นฉบับเสมอ</li><li>อย่าใส่รหัสผ่านหรือข้อมูลส่วนตัวในเอกสาร</li></ul></section><section className="panel recent-materials"><div className="panel-heading"><div><h3>สรุปล่าสุด</h3><p>รายการที่บันทึกไว้</p></div><BookMarked size={18} className="muted-icon" /></div>{loading ? <div className="inline-loading"><LoaderCircle size={18} className="spin" /></div> : materials.length ? <div className="recent-material-list">{materials.map(m => <button className="recent-material" key={m.id} onClick={() => viewMaterial(m)}><div className="recent-material-icon"><FileText size={16} /></div><div><b>{m.title}</b><small>{formatDate(m.created_at)}</small></div><ChevronRight size={15} /></button>)}</div> : <p className="muted small-copy">ยังไม่มีสรุปที่บันทึกไว้</p>}</section></aside></div>
+  function viewMaterial(material) {
+    const storedAttachment = typeof material.source_text === 'string' && material.source_text.startsWith('[ไฟล์แนบ:');
+    setSelectedMaterialId(material.id); setTitle(material.title || ''); setCourseId(material.course_id || ''); setSummary(material.summary || '');
+    setContent(storedAttachment ? '' : material.source_text || ''); setAttachment(null); setFileName(storedAttachment ? material.source_text.replace(/^\\[ไฟล์แนบ:\\s*/, '').replace(/\\]$/, '') : '');
+    setEditingSummary(false); setError(''); setSavedNotice(storedAttachment ? 'โหลดสรุปแล้ว หากต้องการสร้างใหม่จากต้นฉบับ ให้แนบไฟล์เดิมอีกครั้ง' : 'โหลดสรุปที่บันทึกไว้แล้ว');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  async function deleteMaterial(material) {
+    if (!window.confirm('ลบสรุป “' + material.title + '” หรือไม่? การลบนี้ย้อนกลับไม่ได้')) return;
+    const { error: deleteError } = await supabase.from('learning_materials').delete().eq('id', material.id);
+    if (deleteError) { setError('ลบสรุปไม่สำเร็จ กรุณาตรวจสอบสิทธิ์ฐานข้อมูล'); return; }
+    setMaterials(prev => prev.filter(item => item.id !== material.id));
+    if (selectedMaterialId === material.id) { setSelectedMaterialId(''); setTitle(''); setContent(''); setSummary(''); setAttachment(null); setFileName(''); setEditingSummary(false); }
+    setSavedNotice('ลบสรุปแล้ว');
+  }
+  function clearSummaryForm() { setSelectedMaterialId(''); setTitle(''); setContent(''); setSummary(''); setCourseId(''); setAttachment(null); setFileName(''); setEditingSummary(false); setError(''); setSavedNotice(''); }
+  const filteredMaterials = materials.filter(item => (item.title || '').toLowerCase().includes(searchMaterials.toLowerCase()) || (item.summary || '').toLowerCase().includes(searchMaterials.toLowerCase()));
+  return <>
+    <PageHeader eyebrow="LEARN WITH CLARITY" title="สรุปบทเรียนด้วย AI" description="วางข้อความหรือแนบไฟล์ PDF/รูปภาพ แล้วเปลี่ยนเป็นสรุปที่บันทึกและกลับมาแก้ไขได้" action={<div className="ai-status"><span className="ai-status-dot" /><Sparkles size={15} /> AI assistant</div>} />
+    <div className="summary-layout">
+      <div className="summary-main-column">
+        <section className="panel summary-input-panel">
+          <div className="panel-heading"><div><h3><WandSparkles size={18} /> สร้างสรุปใหม่</h3><p>เลือกไฟล์หรือวางเนื้อหาที่ต้องการทำความเข้าใจ</p></div><div className="ai-mini-label"><Sparkles size={13} /> AI POWERED</div></div>
+          {error && <Notice kind="error">{error}</Notice>}{savedNotice && <Notice kind="success">{savedNotice}</Notice>}
+          <form onSubmit={generate} className="summary-form">
+            <Field label="ชื่อบทเรียน" placeholder="เช่น C++ — เงื่อนไขและการวนซ้ำ" value={title} onChange={e => setTitle(e.target.value)} />
+            <Field label="รายวิชา"><select value={courseId} onChange={e => setCourseId(e.target.value)}><option value="">เลือกภายหลัง / ไม่ระบุ</option>{courses.map(course => <option key={course.id} value={course.id}>{course.name}</option>)}</select></Field>
+            <Field label="แนบไฟล์จากเครื่อง" hint="รองรับ TXT, MD, CSV, PDF, PNG, JPG และ WEBP · สูงสุด 8 MB">
+              <input type="file" accept=".txt,.md,.markdown,.csv,.log,.pdf,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/csv,application/pdf,image/png,image/jpeg,image/webp" onChange={async e => { const file = e.target.files && e.target.files[0]; if (file) await applyStudyFile(file, setContent, setAttachment, setFileName, setError); e.target.value = ''; }} />
+            </Field>
+            {fileName && <div className="file-selection"><FileCheck2 size={16} /><span>{fileName}</span><button type="button" className="text-link plain" onClick={() => { setAttachment(null); setFileName(''); }}>เอาไฟล์ออก</button></div>}
+            <Field label="เนื้อหาบทเรียน" hint={content.length.toLocaleString() + ' ตัวอักษร · หากแนบ PDF/รูปภาพ ไม่จำเป็นต้องวางข้อความ'}><textarea className="summary-textarea" rows="10" placeholder="วางเนื้อหาบทเรียนหรือโน้ตตรงนี้…" value={content} onChange={e => setContent(e.target.value)} /></Field>
+            <div className="summary-input-footer"><span><ShieldCheck size={14} /> ข้อความสูงสุด 50,000 ตัวอักษร</span><div className="summary-form-actions"><Button type="button" variant="secondary" onClick={clearSummaryForm}><Plus size={15} /> สรุปใหม่</Button><Button type="submit" loading={busy}><Sparkles size={16} /> สร้างสรุปด้วย AI</Button></div></div>
+          </form>
+        </section>
+        <section className="panel summary-result-panel">
+          <div className="panel-heading"><div><h3><FileText size={18} /> สรุปบทเรียน</h3><p>{selectedMaterialId ? 'แก้ไขสรุปที่บันทึกไว้ หรือบันทึกการเปลี่ยนแปลง' : 'เนื้อหาที่ AI สร้างจากข้อความหรือไฟล์ที่ส่ง'}</p></div>
+            {summary && <div className="summary-export-actions">
+              <Button size="sm" variant="secondary" onClick={() => downloadSummaryExport(summary, title, 'pdf').catch(err => setError(err.message || 'ส่งออก PDF ไม่สำเร็จ'))}><FileText size={14} /> PDF</Button>
+              <Button size="sm" variant="secondary" onClick={() => downloadSummaryExport(summary, title, 'png').catch(err => setError(err.message || 'ส่งออก PNG ไม่สำเร็จ'))}><FileCheck2 size={14} /> PNG</Button>
+              <Button size="sm" variant="secondary" onClick={() => setEditingSummary(v => !v)}><Pencil size={14} /> {editingSummary ? 'ดูตัวอย่าง' : 'แก้ไขข้อความ'}</Button>
+              <Button size="sm" onClick={saveSummary} loading={saving}><Check size={14} /> {selectedMaterialId ? 'บันทึกการแก้ไข' : 'บันทึกสรุป'}</Button>
+            </div>}
+          </div>
+          {summary ? <div className="summary-output">
+            <div className="summary-output-meta"><div className="summary-output-icon"><Sparkles size={17} /></div><div><strong>{title.trim() || 'สรุปบทเรียน'}</strong><small>AI-generated summary · โปรดตรวจทานกับเอกสารต้นฉบับ</small></div></div>
+            {editingSummary
+              ? <textarea className="summary-edit-textarea" rows="18" value={summary} onChange={e => setSummary(e.target.value)} aria-label="แก้ไขข้อความสรุป" />
+              : <div className="summary-markdown">{summary.split('\n').map((line, i) => line.startsWith('### ') ? <h4 key={i}>{line.replace(/^###\s*/, '')}</h4> : line.startsWith('## ') ? <h3 key={i}>{line.replace(/^##\s*/, '')}</h3> : line.startsWith('# ') ? <h2 key={i}>{line.replace(/^#\s*/, '')}</h2> : line.startsWith('- ') || line.startsWith('* ') ? <p className="summary-bullet" key={i}><span>•</span>{line.slice(2)}</p> : line.trim() ? <p key={i}>{line}</p> : <div key={i} className="summary-space" />)}</div>}
+            <div className="summary-next-step"><div><Lightbulb size={18} /><b>พร้อมทดสอบความเข้าใจหรือยัง?</b></div><p>ใช้เนื้อหาต้นฉบับนี้สร้าง Quick Quiz เพื่อดูว่าหัวข้อไหนควรกลับไปทบทวน</p><button className="text-link plain" onClick={() => { window.sessionStorage.setItem('studyPilotQuizContent', content); window.location.href = '/app/quiz'; }}>สร้าง Quick Quiz <ArrowRight size={14} /></button></div>
+          </div> : <EmptyState icon={FileText} title="สรุปบทเรียนจะแสดงที่นี่" description="เมื่อสร้างสรุปสำเร็จ คุณสามารถแก้ไข ส่งออก PDF/PNG และบันทึกไว้ใช้ครั้งต่อไปได้" />}
+        </section>
+      </div>
+      <aside className="summary-side-column">
+        <section className="panel summary-tips"><div className="tips-icon"><Lightbulb size={20} /></div><h3>เคล็ดลับให้สรุปดีขึ้น</h3><ul><li>แบ่งเนื้อหาเป็นบทหรือหัวข้อ</li><li>ใส่คำจำกัดความและตัวอย่างที่อาจออกสอบ</li><li>ตรวจทานกับเอกสารต้นฉบับเสมอ</li><li>อย่าใส่รหัสผ่านหรือข้อมูลส่วนตัวในเอกสาร</li></ul></section>
+        <section className="panel recent-materials">
+          <div className="panel-heading"><div><h3>สรุปที่บันทึกไว้</h3><p>{materials.length} รายการล่าสุดที่ค้นหาได้</p></div><BookMarked size={18} className="muted-icon" /></div>
+          <div className="search-field"><Search size={15} /><input value={searchMaterials} onChange={e => setSearchMaterials(e.target.value)} placeholder="ค้นหาชื่อหรือเนื้อหาสรุป…" /></div>
+          {loading ? <div className="inline-loading"><LoaderCircle size={18} className="spin" /></div> : filteredMaterials.length ? <div className="recent-material-list">{filteredMaterials.map(material => <div className="recent-material-entry" key={material.id}><button className="recent-material" onClick={() => viewMaterial(material)}><div className="recent-material-icon"><FileText size={16} /></div><div><b>{material.title}</b><small>{formatDate(material.created_at)}</small></div><ChevronRight size={15} /></button><button className="icon-btn danger-hover recent-delete" onClick={() => deleteMaterial(material)} aria-label={'ลบสรุป ' + material.title} title="ลบสรุป"><Trash2 size={15} /></button></div>)}</div> : <EmptyState icon={FileText} title="ไม่พบสรุปบทเรียน" description="บันทึกสรุปแรกของคุณ แล้วจะค้นหาและกลับมาแก้ไขได้จากที่นี่" />}
+        </section>
+      </aside>
+    </div>
   </>;
 }
 
