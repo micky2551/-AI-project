@@ -111,12 +111,8 @@ function pickGeminiKey(excluded = new Set()) {
       return { index, key: GEMINI_KEYS[index], state };
     }
   }
-  const next = configured
-    .map((state) => ({ state, index: state.index - 1 }))
-    .sort((a, b) => a.state.cooldownUntil - b.state.cooldownUntil)[0];
-  if (!next) return null;
-  nextGeminiKeyIndex = (next.index + 1) % GEMINI_KEYS.length;
-  return { index: next.index, key: GEMINI_KEYS[next.index], state: next.state };
+  // Do not bypass cooldown when every remaining key is cooling down.
+  return null;
 }
 
 function cooldownGeminiKey(state, duration) {
