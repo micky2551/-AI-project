@@ -75,7 +75,7 @@ function parseJson(text) {
 
 const GEMINI_KEY_COOLDOWN_MS = 60_000;
 const GEMINI_AUTH_COOLDOWN_MS = 5 * 60_000;
-const GEMINI_MAX_5XX_RETRIES = 1;
+const GEMINI_MAX_5XX_BACKOFFS = 1;
 const GEMINI_REQUEST_TIMEOUT_MS = 45_000;
 const geminiKeyState = GEMINI_KEYS.map((key, index) => ({
   index: index + 1,
@@ -155,7 +155,7 @@ async function askGemini(system, prompt, maxTokens = 1800, attachment = null) {
   let lastFailureKind = 'unknown';
   let totalAttempts = 0;
 
-  while (attempted.size < configuredCount && totalAttempts < configuredCount * (GEMINI_MAX_5XX_RETRIES + 1)) {
+  while (attempted.size < configuredCount && totalAttempts < configuredCount * (GEMINI_MAX_5XX_BACKOFFS + 1)) {
     const selected = pickGeminiKey(attempted);
     if (!selected) break;
     const { index, key, state } = selected;
@@ -231,7 +231,7 @@ async function askGemini(system, prompt, maxTokens = 1800, attachment = null) {
     }
 
     cooldownGeminiKey(state, info.cooldownMs);
-    if (response.status >= 500 && response.status <= 599 && totalAttempts < configuredCount * (GEMINI_MAX_5XX_RETRIES + 1)) {
+    if (response.status >= 500 && response.status <= 599 && totalAttempts < configuredCount * (GEMINI_MAX_5XX_BACKOFFS + 1)) {
       const base = 250 * (2 ** Math.min(state.consecutiveFailures - 1, 2));
       const delay = base + Math.floor(Math.random() * 200);
       logGeminiEvent('retry_backoff', state, { attempt: totalAttempts, retryInMs: delay });
