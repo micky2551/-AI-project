@@ -11,7 +11,8 @@ function inferMimeType(file) {
     jpeg: 'image/jpeg',
     webp: 'image/webp',
   };
-  return file.type || byExtension[extension] || '';
+  const reportedType = (file.type || '').toLowerCase();
+  return SUPPORTED_MIME_TYPES.has(reportedType) ? reportedType : (byExtension[extension] || '');
 }
 
 function readAsDataUrl(file) {
