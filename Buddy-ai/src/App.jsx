@@ -462,7 +462,7 @@ async function applyStudyFile(file, setContent, setAttachment, setFileName, setE
   try {
     const loaded = await readStudyFile(file);
     setContent(loaded.content); setAttachment(loaded.attachment); setFileName(loaded.fileName); setError('');
-  } catch (error) { setError(error instanceof Error ? error.message : 'อ่านไฟล์ไม่สำเร็จ'); }
+  } catch (error) { setAttachment(null); setFileName(''); setError(error instanceof Error ? error.message : 'อ่านไฟล์ไม่สำเร็จ'); }
 }
 
 function SummaryPage() {
@@ -499,7 +499,7 @@ function SummaryPage() {
     setSaving(true); setError(''); setSavedNotice('');
     try {
       const titleValue = title.trim() || 'สรุปบทเรียน';
-      const sourceText = content.trim() || (attachment ? '[ไฟล์แนบ: ' + (fileName || attachment.name) + ']' : '');
+      const sourceText = content.trim() || ((attachment || (selectedMaterialId && fileName)) ? '[ไฟล์แนบ: ' + (fileName || attachment?.name || 'ไฟล์เดิม') + ']' : '');
       const row = { title: titleValue, course_id: courseId || null, source_text: sourceText, summary: summary.trim() };
       const result = selectedMaterialId
         ? await supabase.from('learning_materials').update(row).eq('id', selectedMaterialId).select('id').maybeSingle()
