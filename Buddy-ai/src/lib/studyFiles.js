@@ -1,4 +1,4 @@
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_CHARS = 50_000;
 const SUPPORTED_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 
@@ -27,7 +27,7 @@ function readAsDataUrl(file) {
 export async function readStudyFile(file) {
   if (!file) throw new Error('กรุณาเลือกไฟล์ก่อน');
   if (file.size <= 0) throw new Error('ไฟล์ว่าง กรุณาเลือกไฟล์อื่น');
-  if (file.size > MAX_FILE_BYTES) throw new Error('ไฟล์มีขนาดเกิน 8 MB กรุณาเลือกไฟล์ที่เล็กลง');
+  if (file.size > MAX_FILE_BYTES) throw new Error('ไฟล์มีขนาดเกิน 20 MB กรุณาเลือกไฟล์ที่เล็กลง');
 
   const extension = file.name.split('.').pop()?.toLowerCase();
   const isText = ['txt', 'md', 'markdown', 'csv', 'log'].includes(extension) ||
