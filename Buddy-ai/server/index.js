@@ -27,7 +27,7 @@ app.use(cors({
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({ limit: '30mb' }));
 app.use('/api/ai', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false }));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'buddy-ai-api' }));
@@ -158,12 +158,16 @@ async function askClaude(system, prompt, maxTokens = 1800, attachment = null) {
   return text;
 }
 
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const ALLOWED_ATTACHMENT_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 function validateAttachment(value) {
   if (value == null) return { attachment: null, error: null };
   if (!value || typeof value !== 'object' || typeof value.mimeType !== 'string' || !ALLOWED_ATTACHMENT_TYPES.has(value.mimeType) || typeof value.base64 !== 'string') return { attachment: null, error: 'รองรับไฟล์ PDF, PNG, JPG และ WEBP เท่านั้น' };
   const base64 = value.base64.replace(/\s/g, '');
-  if (!base64 || base64.length % 4 !== 0 || base64.length > 11_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || Math.floor(base64.length * 3 / 4) > 8_000_000) return { attachment: null, error: 'ไฟล์ว่างหรือมีขนาดเกิน 8 MB กรุณาเลือกไฟล์ที่เล็กลง' };
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  const decodedBytes = Math.floor(base64.length * 3 / 4) - padding;
+  const maxBase64Chars = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4;
+  if (!base64 || base64.length % 4 !== 0 || base64.length > maxBase64Chars || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || decodedBytes > MAX_ATTACHMENT_BYTES) return { attachment: null, error: 'ไฟล์ว่างหรือมีขนาดเกิน 20 MB กรุณาเลือกไฟล์ที่เล็กลง' };
   return { attachment: { mimeType: value.mimeType, base64, name: typeof value.name === 'string' ? value.name.slice(0, 180) : 'attachment' }, error: null };
 }
 
@@ -218,7 +222,7 @@ app.post('/api/ai/quiz', requireUser, async (req, res) => {
 
 app.use((err, _req, res, _next) => {
   if (err.message === 'Origin not allowed') return res.status(403).json({ error: 'Origin not allowed' });
-  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'ไฟล์ใหญ่เกินไป ขนาดสูงสุด 8 MB' });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'ไฟล์ใหญ่เกินไป ขนาดสูงสุด 20 MB' });
   return res.status(500).json({ error: 'เกิดข้อผิดพลาดที่เซิร์ฟเวอร์' });
 });
 
