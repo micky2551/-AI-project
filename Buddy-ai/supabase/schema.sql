@@ -374,3 +374,6 @@ with check (bucket_id = 'study-files' and (storage.foldername(name))[1] = (selec
 drop policy if exists study_files_storage_delete_own on storage.objects;
 create policy study_files_storage_delete_own on storage.objects for delete to authenticated
 using (bucket_id = 'study-files' and (storage.foldername(name))[1] = (select auth.uid()::text) and public.is_active_user());
+
+create index if not exists study_files_course_id_idx on public.study_files(course_id);
+create index if not exists learning_materials_study_file_id_idx on public.learning_materials(study_file_id);
