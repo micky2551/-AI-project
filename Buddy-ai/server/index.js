@@ -162,7 +162,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Set(['application/pdf', 'image/png', 'image
 function validateAttachment(value) {
   if (value == null) return { attachment: null, error: null };
   if (!value || typeof value !== 'object' || typeof value.mimeType !== 'string' || !ALLOWED_ATTACHMENT_TYPES.has(value.mimeType) || typeof value.base64 !== 'string') return { attachment: null, error: 'รองรับไฟล์ PDF, PNG, JPG และ WEBP เท่านั้น' };
-  const base64 = value.base64.replace(/\\s/g, '');
+  const base64 = value.base64.replace(/\s/g, '');
   if (!base64 || base64.length > 11_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || Math.floor(base64.length * 3 / 4) > 8_000_000) return { attachment: null, error: 'ไฟล์ว่างหรือมีขนาดเกิน 8 MB กรุณาเลือกไฟล์ที่เล็กลง' };
   return { attachment: { mimeType: value.mimeType, base64, name: typeof value.name === 'string' ? value.name.slice(0, 180) : 'attachment' }, error: null };
 }
