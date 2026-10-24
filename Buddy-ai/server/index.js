@@ -27,10 +27,10 @@ app.use(cors({
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '12mb' }));
 app.use('/api/ai', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false }));
 
-app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'studypilot-ai-api' }));
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'buddy-ai-api' }));
 
 function extractBearer(req) {
   const match = req.get('authorization')?.match(/^Bearer\s+(.+)$/i);
@@ -66,7 +66,7 @@ function parseJson(text) {
   }
 }
 
-async function askGemini(system, prompt, maxTokens = 1800) {
+async function askGemini(system, prompt, maxTokens = 1800, attachment = null) {
   if (!GEMINI_API_KEY) {
     const err = new Error('ยังไม่ได้ตั้งค่า Gemini API กรุณาสร้าง API Key จาก Google AI Studio แล้วใส่ใน GEMINI_API_KEY ในไฟล์ .env');
     err.status = 503;
@@ -82,7 +82,7 @@ async function askGemini(system, prompt, maxTokens = 1800) {
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts: [{ text: prompt }, ...(attachment ? [{ inlineData: { mimeType: attachment.mimeType, data: attachment.base64 } }] : [])] }],
       generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
     }),
     signal: AbortSignal.timeout(45_000),
@@ -117,15 +117,15 @@ async function askGemini(system, prompt, maxTokens = 1800) {
   return text;
 }
 
-async function askAI(system, prompt, maxTokens = 1800) {
-  if (AI_PROVIDER === 'gemini') return askGemini(system, prompt, maxTokens);
-  if (AI_PROVIDER === 'anthropic') return askClaude(system, prompt, maxTokens);
+async function askAI(system, prompt, maxTokens = 1800, attachment = null) {
+  if (AI_PROVIDER === 'gemini') return askGemini(system, prompt, maxTokens, attachment);
+  if (AI_PROVIDER === 'anthropic') return askClaude(system, prompt, maxTokens, attachment);
   const err = new Error('ค่า AI_PROVIDER ไม่ถูกต้อง ให้ใช้ gemini หรือ anthropic');
   err.status = 503;
   throw err;
 }
 
-async function askClaude(system, prompt, maxTokens = 1800) {
+async function askClaude(system, prompt, maxTokens = 1800, attachment = null) {
   if (!ANTHROPIC_API_KEY) {
     const err = new Error('AI ยังไม่ได้เชื่อมต่อ กรุณากำหนด ANTHROPIC_API_KEY ในไฟล์ .env ฝั่งเซิร์ฟเวอร์');
     err.status = 503;
@@ -142,7 +142,7 @@ async function askClaude(system, prompt, maxTokens = 1800) {
       model: ANTHROPIC_MODEL,
       max_tokens: maxTokens,
       system,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: attachment ? [{ type: 'text', text: prompt }, ...(attachment.mimeType === 'application/pdf' ? [{ type: 'document', source: { type: 'base64', media_type: attachment.mimeType, data: attachment.base64 } }] : [{ type: 'image', source: { type: 'base64', media_type: attachment.mimeType, data: attachment.base64 } }])] : prompt }],
     }),
     signal: AbortSignal.timeout(45_000),
   });
@@ -156,6 +156,15 @@ async function askClaude(system, prompt, maxTokens = 1800) {
   const text = (payload.content || []).filter((block) => block.type === 'text').map((block) => block.text).join('\n').trim();
   if (!text) { const error = new Error('AI ไม่ได้ส่งคำตอบกลับมา'); error.status = 502; throw error; }
   return text;
+}
+
+const ALLOWED_ATTACHMENT_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
+function validateAttachment(value) {
+  if (value == null) return { attachment: null, error: null };
+  if (!value || typeof value !== 'object' || typeof value.mimeType !== 'string' || !ALLOWED_ATTACHMENT_TYPES.has(value.mimeType) || typeof value.base64 !== 'string') return { attachment: null, error: 'รองรับไฟล์ PDF, PNG, JPG และ WEBP เท่านั้น' };
+  const base64 = value.base64.replace(/\\s/g, '');
+  if (!base64 || base64.length > 11_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || Math.floor(base64.length * 3 / 4) > 8_000_000) return { attachment: null, error: 'ไฟล์ว่างหรือมีขนาดเกิน 8 MB กรุณาเลือกไฟล์ที่เล็กลง' };
+  return { attachment: { mimeType: value.mimeType, base64, name: typeof value.name === 'string' ? value.name.slice(0, 180) : 'attachment' }, error: null };
 }
 
 app.post('/api/ai/summary', requireUser, async (req, res) => {
@@ -208,7 +217,7 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, () => {
   // Do not print secret values to the terminal.
-  console.log(`StudyPilot AI API listening on http://localhost:${PORT}`);
+  console.log(`Buddy AI API listening on http://localhost:${PORT}`);
   if (!SUPABASE_URL || !SUPABASE_KEY) console.warn('Supabase server variables are missing; authenticated AI endpoints will be unavailable.');
   if (AI_PROVIDER === 'gemini' && !GEMINI_API_KEY) console.warn('GEMINI_API_KEY is missing; AI summary and Quiz endpoints will return a setup message.');
   if (AI_PROVIDER === 'anthropic' && !ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is missing; AI summary and Quiz endpoints will return a setup message.');
