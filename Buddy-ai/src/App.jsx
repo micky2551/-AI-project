@@ -493,7 +493,7 @@ function SummaryPage() {
     if (!attachment && content.trim().length < 50) { setError('กรุณาใส่เนื้อหาอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์'); return; }
     setBusy(true);
     try {
-      const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || fileName || 'บทเรียนไม่มีชื่อ', studyFileId: storedFileId || undefined, attachment: storedFileId ? null : attachment }, session.access_token);
+      const result = await callAI('/api/ai/summary', { content: content.trim(), title: title.trim() || fileName || 'บทเรียนไม่มีชื่อ', studyFileId: storedFileId && !studyFiles.find(file => file.id === storedFileId)?.mime_type.startsWith('text/') ? storedFileId : undefined, attachment: storedFileId ? null : attachment }, session.access_token);
       setSummary(result.summary); setEditingSummary(false);
     } catch (err) { setError(err.message || 'สรุปบทเรียนไม่สำเร็จ'); }
     finally { setBusy(false); }
@@ -598,7 +598,7 @@ function QuizPage() {
     if (!attachment && content.trim().length < 50) return setError('กรุณาใส่เนื้อหาบทเรียนอย่างน้อย 50 ตัวอักษรหรือแนบไฟล์');
     setBusy(true);
     try {
-      const result = await callAI('/api/ai/quiz', { content: content.trim(), topic: topic.trim() || fileName || 'บทเรียนทั่วไป', count: Number(count), studyFileId: storedFileId || undefined, attachment: storedFileId ? null : attachment }, session.access_token);
+      const result = await callAI('/api/ai/quiz', { content: content.trim(), topic: topic.trim() || fileName || 'บทเรียนทั่วไป', count: Number(count), studyFileId: storedFileId && !studyFiles.find(file => file.id === storedFileId)?.mime_type.startsWith('text/') ? storedFileId : undefined, attachment: storedFileId ? null : attachment }, session.access_token);
       setQuestions(result.questions || []); if (!result.questions?.length) setError('AI ยังสร้างคำถามที่ใช้ได้ไม่สำเร็จ กรุณาลองใหม่');
     } catch (err) { setError(err.message || 'สร้าง Quiz ไม่สำเร็จ'); } finally { setBusy(false); }
   }
